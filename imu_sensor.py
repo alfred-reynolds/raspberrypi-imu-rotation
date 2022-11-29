@@ -4,6 +4,7 @@ import smbus
 import time
 import os
 import sys
+import subprocess
 
 # Data sheet for chip: https://www.nxp.com/docs/en/data-sheet/MMA8452Q.pdf 
 
@@ -127,9 +128,9 @@ def configureDevice(bus):
 def printAcceleration(bus):
 	xAccl, yAccl, zAccl = getAcceleration(bus)
 	# Output data to screen
-	print "Acceleration in X-Axis : %d" %xAccl
-	print "Acceleration in Y-Axis : %d" %yAccl
-	print "Acceleration in Z-Axis : %d" %zAccl
+	print ("Acceleration in X-Axis : %d" %xAccl)
+	print ("Acceleration in Y-Axis : %d" %yAccl)
+	print ("Acceleration in Z-Axis : %d" %zAccl)
 
 def rotationCommand(orientation):
 	return {
@@ -139,26 +140,46 @@ def rotationCommand(orientation):
 	 	Landscape_LEFT: "xrandr --output HDMI-1 --rotate inverted"
     }[orientation]
 
+def getXWindowsRotation():
+	xWinRotation = subprocess.check_output("xrandr -q --verbose | grep HDMI-1 | sed 's/primary //' | awk '{print $5}'", shell=True).decode(sys.stdout.encoding).rstrip('\n')
+	print ("Current XWin roatation: " + xWinRotation)
+	return {
+		"right" : Portrait_UP,
+		"left" : Portrait_DOWN,
+		"normal" : Landscape_RIGHT,
+		"inverted" : Landscape_LEFT,
+	}[xWinRotation]
+
 def main():
 	# Get I2C bus
 	bus = smbus.SMBus(1)
 
 	configureDevice(bus)
+	time.sleep(0.4)
 	configureOrientation(bus)
-	time.sleep(1.0)
+	time.sleep(0.4)
 	_, currentOrientation = getOrientation(bus)
+	time.sleep(0.2)
+	_, extraCurrentOrientation = getOrientation(bus)
 	os.environ["DISPLAY"] = ":0.0"
-
+	print ("Current orientation " + orientationString(currentOrientation) )
+	if extraCurrentOrientation != currentOrientation:
+		print ("Initial orientation changed! " + orientationString(currentOrientation) + " to " + orientationString(extraCurrentOrientation) )
 	os.system(rotationCommand(currentOrientation))
+	checkXWinRotation = 0 # check XWin matches what we think right away
 	while 1:
-		newOrientation, orientation = getOrientation(bus)
+		bNewOrientation, orientation = getOrientation(bus)
 		#print orientationString(orientation)
 		# print getSystemMode(bus)
-		if newOrientation:
-			print "Orientation changed from " + orientationString(currentOrientation) + " to " + orientationString(orientation)
+		if bNewOrientation or (checkXWinRotation == 0 and orientation != getXWindowsRotation()):
+			getXWindowsRotation()
+			print ("Orientation changed from " + orientationString(currentOrientation) + " to " + orientationString(orientation))
 			if currentOrientation != orientation:
 				os.system(rotationCommand(orientation))
 				currentOrientation = orientation
+		if checkXWinRotation == 0:
+			checkXWinRotation = 60*5 # check against Xwindows view of the world every 5 minutes
+		checkXWinRotation -= 1 
 		time.sleep(1.0)
 
 if __name__ == '__main__':
