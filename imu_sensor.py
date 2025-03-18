@@ -39,7 +39,7 @@ Portrait_DOWN 		= 0x1 # Equipment standing vertically in the inverted orientatio
 Landscape_RIGHT		= 0x2 # Equipment is in landscape mode to the right
 Landscape_LEFT		= 0x3 # Equipment is in landscape mode to the left.
 
-Orientation_Rotation = 1 # Offset into values above based on IMU attachment direction to the frame
+Orientation_Rotation = 0 # Offset into values above based on IMU attachment direction to the frame
 
 def getAccelValue(data):
 	Accl = (data[0] * 256 + data[1]) / 16
@@ -50,10 +50,11 @@ def getAccelValue(data):
 def getOrientation(bus):
 		data = bus.read_i2c_block_data(i2c_addr, PL_STATUS, 1)
 		newOrientation = False
-		#print data[0]
+		#print(data[0])
 		if data[0] & NEWLP_MASK:
 			newOrientation = True
-		orientation = (((data[0] & 6)/2)+Orientation_Rotation)%0x3
+		orientation = ((int(data[0] & 6)>>1)+Orientation_Rotation)%4
+		#print("Orien: " + str(orientation))
 		return newOrientation, orientation
 
 def orientationString(orientation):
@@ -134,20 +135,26 @@ def printAcceleration(bus):
 
 def rotationCommand(orientation):
 	return {
-        Portrait_UP: "xrandr --output HDMI-1 --rotate right",
-		 Portrait_DOWN: "xrandr --output HDMI-1 --rotate left",
-		 Landscape_RIGHT: "xrandr --output HDMI-1 --rotate normal",
-	 	Landscape_LEFT: "xrandr --output HDMI-1 --rotate inverted"
+        Portrait_UP: "wlr-randr  --output HDMI-A-1 --transform normal",
+		 Portrait_DOWN: "wlr-randr  --output HDMI-A-1 --transform 180",
+		 Landscape_RIGHT: "wlr-randr  --output HDMI-A-1 --transform 90",
+	 	Landscape_LEFT: "wlr-randr  --output HDMI-A-1 --transform 270"
     }[orientation]
+#        Portrait_UP: "xrandr --output HDMI-1 --rotate right",
+#		 Portrait_DOWN: "xrandr --output HDMI-1 --rotate left",
+#		 Landscape_RIGHT: "xrandr --output HDMI-1 --rotate normal",
+#	 	Landscape_LEFT: "xrandr --output HDMI-1 --rotate inverted"
+
 
 def getXWindowsRotation():
-	xWinRotation = subprocess.check_output("xrandr -q --verbose | grep HDMI-1 | sed 's/primary //' | awk '{print $5}'", shell=True).decode(sys.stdout.encoding).rstrip('\n')
+	#xWinRotation = subprocess.check_output("xrandr -q --verbose | grep HDMI-1 | sed 's/primary //' | awk '{print $5}'", shell=True).decode(sys.stdout.encoding).rstrip('\n')
+	xWinRotation = subprocess.check_output("wlr-randr --output HDMI-A-1 | grep Transform | awk '{print $2}'", shell=True).decode(sys.stdout.encoding).rstrip('\n')
 	print ("Current XWin roatation: " + xWinRotation)
 	return {
-		"right" : Portrait_UP,
-		"left" : Portrait_DOWN,
-		"normal" : Landscape_RIGHT,
-		"inverted" : Landscape_LEFT,
+		"normal" : Portrait_UP,
+		"180" : Portrait_DOWN,
+		"90" : Landscape_RIGHT,
+		"270" : Landscape_LEFT,
 	}[xWinRotation]
 
 def main():
@@ -158,10 +165,10 @@ def main():
 	time.sleep(0.4)
 	configureOrientation(bus)
 	time.sleep(0.4)
-	_, currentOrientation = getOrientation(bus)
-	time.sleep(0.2)
 	_, extraCurrentOrientation = getOrientation(bus)
-	os.environ["DISPLAY"] = ":0.0"
+	time.sleep(0.2)
+	_, currentOrientation = getOrientation(bus)
+	#os.environ["DISPLAY"] = ":0.0"
 	print ("Current orientation " + orientationString(currentOrientation) )
 	if extraCurrentOrientation != currentOrientation:
 		print ("Initial orientation changed! " + orientationString(currentOrientation) + " to " + orientationString(extraCurrentOrientation) )
@@ -169,14 +176,12 @@ def main():
 	checkXWinRotation = 0 # check XWin matches what we think right away
 	while 1:
 		bNewOrientation, orientation = getOrientation(bus)
-		#print orientationString(orientation)
-		# print getSystemMode(bus)
+		#print("" + orientationString(orientation))
 		if bNewOrientation or (checkXWinRotation == 0 and orientation != getXWindowsRotation()):
 			getXWindowsRotation()
 			print ("Orientation changed from " + orientationString(currentOrientation) + " to " + orientationString(orientation))
-			if currentOrientation != orientation:
-				os.system(rotationCommand(orientation))
-				currentOrientation = orientation
+			os.system(rotationCommand(orientation))
+			currentOrientation = orientation
 		if checkXWinRotation == 0:
 			checkXWinRotation = 60*5 # check against Xwindows view of the world every 5 minutes
 		checkXWinRotation -= 1 
